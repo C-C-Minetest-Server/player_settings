@@ -4,6 +4,7 @@ local S = minetest.get_translator("player_settings")
 
 _ps.gui = flow.make_gui(function(player,ctx)
     ctx.name = player:get_player_name()
+    if not ctx.showinfo then ctx.showinfo = {} end
     if not ctx.navbarData then
         local settings_by_category = {}
         for k,v in pairs(_ps.registered_settings) do
@@ -30,7 +31,6 @@ _ps.gui = flow.make_gui(function(player,ctx)
             end
         end
         ctx.navbarData = categories_by_metacat
-        print(dump(ctx.navbarData))
     end
     local navbar = {}
     for k,v in pairs(ctx.navbarData) do
@@ -39,7 +39,9 @@ _ps.gui = flow.make_gui(function(player,ctx)
             table.insert(navbar,gui.Button {
                 label = _ps.registered_categories[k2].title, 
                 w = 1, expand = true,
+                ---@diagnostic disable-next-line: redefined-local, unused-local
                 on_event = function(player,ctx)
+                    if ctx.current_category == k2 then return end
                     ctx.current_metacat = k
                     ctx.current_category = k2
                     return true
@@ -61,22 +63,53 @@ _ps.gui = flow.make_gui(function(player,ctx)
         local list_settings = ctx.navbarData[ctx.current_metacat][ctx.current_category]
         local svbox = {}
         for k,v in pairs(list_settings) do
-            if v.type == "bool" then
+            local desc = S("@1 (@2)",v.description,_ps.util.types[v.type] or v.type)
+            if v.type == "enum" then
+                desc = S("@1 (Multiple-choice of @2)",
+                    v.description,
+                    _ps.util.types[v.enum_type] or v.enum_type)
+            end
+
+            local display_type = v.display_type
+            if display_type == "enum" and v.type ~= "enum" or 
+                display_type == "bool" and v.type ~= "bool" then
+                display_type = nil
+            end
+
+            -- TODO: Add support to scrollbar for numbers (waiting for flow mod support)
+            if not display_type then
+                if v.type == "bool" then
+                    display_type = "bool"
+                elseif v.type == "enum" then
+                    display_type = "enum"
+                else
+                    display_type = "string"
+                end
+            end
+            
+
+            local s_status, selected = _ps.get_setting(ctx.name,k)
+            if not s_status then
+                ctx.errmsg = {k, S("Failed to get setting of @1: @2",
+                    k, _ps.util.errmsgs[selected] or selected
+                )}
+            elseif display_type == "bool" then
                 table.insert(svbox, gui.HBox {
                     gui.Checkbox {
                         w = 5,h=1,
                         name = "settings_" .. k,
-                        label = v.description,
-                        selected = _ps.get_setting(ctx.name,k),
+                        label = desc,
+                        selected = selected,
                         on_event = function(player,ctx)
+                            ctx.errmsg = nil
                             local form = ctx.form
                             if type(form["settings_" .. k]) == "boolean" then
                                 local status, errmsg =_ps.set_setting(ctx.name,k,form["settings_" .. k])
                                 if not status then
-                                    print(errmsg)
+                                    ctx.errmsg = {k,errmsg}
                                     form["settings_" .. k] = _ps.get_setting(ctx.name,k)
-                                    return true
                                 end
+                                return true
                             end
                         end,
                         expand = true, align_h = "left",
@@ -85,91 +118,54 @@ _ps.gui = flow.make_gui(function(player,ctx)
                         w = 1, h = 1,
                         texture_name = "settings_reset.png",
                         name = "settingsReset_" .. k,
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
                         on_event = function(player,ctx)
+                            ctx.errmsg = nil
                             local form = ctx.form
                             _ps.set_default(ctx.name,k)
                             form["settings_" .. k] = v.default
                             return true
-                        end
+                        end,
+                        drawborder = false,
                     },
-                    gui.Image {
+                    gui.ImageButton {
                         w = 1, h = 1,
-                        name = "settingsInfo_" .. k,
                         texture_name = "settings_info.png",
-                    },
-                    gui.Tooltip {
-                        gui_element_name = "settingsInfo_" .. k,
-                        tooltip_text = v.long_description or ""
+                        name = "settingsInfo_" .. k,
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
+                        on_event = function(player,ctx)
+                            ctx.showinfo[k] = not ctx.showinfo[k]
+                            return true
+                        end,
+                        drawborder = false,
                     }
                 })
-            elseif v.type == "enum" then
+            elseif display_type == "enum" then
+                table.insert(svbox, gui.Label {
+                    label = desc
+                })
                 table.insert(svbox, gui.HBox {
                     gui.Dropdown {
                         w = 3,h=1,
                         name = "settings_" .. k,
-                        label = v.short_description,
                         items = v.enum_choices,
-                        selected = _ps.util.idx_in_table(v.enum_choices,_ps.get_setting(ctx.name,k)),
+                        selected_idx = _ps.util.idx_in_table(v.enum_choices,selected),
                     },
                     gui.Button {
-                        w = 2,h=1,
+                        w = 2, h = 1,
                         name = "settingsSubmit_" .. k,
                         label = S("Set"),
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
                         on_event = function(player,ctx)
+                            ctx.errmsg = nil
                             local form = ctx.form
-                            local status, errmsg =_ps.set_setting(ctx.name,k,v.enum_choices[form["settings_" .. k]])
-                            if not status then
-                                print(errmsg)
-                                form["settings_" .. k] = _ps.util.idx_in_table(v.enum_choices,_ps.get_setting(ctx.name,k))
-                                return true
-                            end
-                        end,
-                        expand = true, align_h = "left",
-                    },
-                    gui.ImageButton {
-                        w = 1, h = 1,
-                        texture_name = "settings_reset.png",
-                        name = "settingsReset_" .. k,
-                        on_event = function(player,ctx)
-                            local form = ctx.form
-                            _ps.set_default(ctx.name,k)
-                            form["settings_" .. k] = _ps.util.idx_in_table(v.enum_choices,v.default)
-                            return true
-                        end
-                    },
-                    gui.Image {
-                        w = 1, h = 1,
-                        name = "settingsInfo_" .. k,
-                        texture_name = "settings_info.png",
-                    },
-                    gui.Tooltip {
-                        gui_element_name = "settingsInfo_" .. k,
-                        tooltip_text = v.long_description or ""
-                    }
-                })
-            else -- String-like
-                table.insert(svbox, gui.Label {
-                    label = v.description
-                })
-                print(_ps.get_setting(ctx.name,k))
-                table.insert(svbox, gui.HBox {
-                    gui.Field {
-                        w = 3,h=1,
-                        name = "settings_" .. k,
-                        default = _ps.get_setting(ctx.name,k),
-                    },
-                    gui.Button {
-                        w = 2,h=1,
-                        name = "settingsSubmit_" .. k,
-                        label = S("Set"),
-                        on_event = function(player,ctx)
-                            local form = ctx.form
+                            print(form["settings_" .. k])
                             local status, errmsg =_ps.set_setting(ctx.name,k,form["settings_" .. k])
                             if not status then
-                                print(errmsg)
+                                ctx.errmsg = {k,errmsg}
                                 form["settings_" .. k] = _ps.get_setting(ctx.name,k)
-                                return true
                             end
+                            return true
                         end,
                         expand = true, align_h = "left",
                     },
@@ -177,22 +173,94 @@ _ps.gui = flow.make_gui(function(player,ctx)
                         w = 1, h = 1,
                         texture_name = "settings_reset.png",
                         name = "settingsReset_" .. k,
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
                         on_event = function(player,ctx)
+                            ctx.errmsg = nil
                             local form = ctx.form
                             _ps.set_default(ctx.name,k)
                             form["settings_" .. k] = v.default
                             return true
-                        end
+                        end,
+                        drawborder = false,
                     },
-                    gui.Image {
+                    gui.ImageButton {
                         w = 1, h = 1,
-                        name = "settingsInfo_" .. k,
                         texture_name = "settings_info.png",
-                    },
-                    gui.Tooltip {
-                        gui_element_name = "settingsInfo_" .. k,
-                        tooltip_text = v.long_description or ""
+                        name = "settingsInfo_" .. k,
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
+                        on_event = function(player,ctx)
+                            ctx.showinfo[k] = not ctx.showinfo[k]
+                            return true
+                        end,
+                        drawborder = false,
                     }
+                })
+            elseif display_type == "string" then -- String-like
+                table.insert(svbox, gui.Label {
+                    label = desc
+                })
+                table.insert(svbox, gui.HBox {
+                    gui.Field {
+                        w = 3,h=1,
+                        name = "settings_" .. k,
+                        default = selected,
+                    },
+                    gui.Button {
+                        w = 2,h=1,
+                        name = "settingsSubmit_" .. k,
+                        label = S("Set"),
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
+                        on_event = function(player,ctx)
+                            ctx.errmsg = nil
+                            local form = ctx.form
+                            local status, errmsg =_ps.set_setting(ctx.name,k,form["settings_" .. k])
+                            if not status then
+                                ctx.errmsg = {k,errmsg}
+                                form["settings_" .. k] = _ps.get_setting(ctx.name,k)
+                            end
+                            return true
+                        end,
+                        expand = true, align_h = "left",
+                    },
+                    gui.ImageButton {
+                        w = 1, h = 1,
+                        texture_name = "settings_reset.png",
+                        name = "settingsReset_" .. k,
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
+                        on_event = function(player,ctx)
+                            ctx.errmsg = nil
+                            local form = ctx.form
+                            _ps.set_default(ctx.name,k)
+                            form["settings_" .. k] = v.default
+                            return true
+                        end,
+                        drawborder = false,
+                    },
+                    gui.ImageButton {
+                        w = 1, h = 1,
+                        texture_name = "settings_info.png",
+                        name = "settingsInfo_" .. k,
+                        ---@diagnostic disable-next-line: redefined-local, unused-local
+                        on_event = function(player,ctx)
+                            ctx.showinfo[k] = not ctx.showinfo[k]
+                            return true
+                        end,
+                        drawborder = false,
+                    }
+                })
+            else
+                error("[player_settings] Attempt to display setting with unknown display type " .. display_type)
+            end
+            if ctx.errmsg and ctx.errmsg[1] == k then
+                local user_errmsg = _ps.util.errmsgs[ctx.errmsg[2]] or ctx.errmsg[2]
+                table.insert(svbox, gui.Label {
+                    label = minetest.colorize("#FF0000", S("Error: @1", user_errmsg)),
+                    -- label = ctx.errmsg[2],
+                })
+            end
+            if ctx.showinfo[k] and v.long_description then
+                table.insert(svbox, gui.Label {
+                    label = minetest.get_color_escape_sequence("#00FF00") .. v.long_description,
                 })
             end
         end

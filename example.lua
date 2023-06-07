@@ -41,3 +41,25 @@ _ps.register_setting("ps_example_bool", {
     default = true,
     category = "ps_example",
 })
+
+_ps.register_setting("ps_example_enum_string", {
+    type = "enum",
+    description = S("Example of @1", "enum (string)"),
+    long_description = S("Long description. \nExample of @1","enum (string)"),
+    default = "1F616EMO",
+    category = "ps_example",
+    enum_type = "string",
+    enum_choices = {
+        "lorem",
+        "ipsum",
+        "hello",
+        "world",
+        "minetest",
+        "1F616EMO",
+    }
+})
+
+_ps.register_category("ps_example_empty",{
+    title = S("Empty Examples"),
+    metacategory = "ps_example_mc"
+})
