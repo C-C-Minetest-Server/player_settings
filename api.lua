@@ -241,9 +241,9 @@ _ps.save_all_settings = function()
 	end
 end
 
-local after_loop = function()
+local function after_loop()
 	_ps.save_all_settings()
-	minetest.after(60,_ps.save_all_settings)
+	minetest.after(60, after_loop)
 end
 
 minetest.after(5, after_loop)
