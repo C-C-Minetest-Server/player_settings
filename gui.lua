@@ -268,18 +268,19 @@ _ps.gui = flow.make_gui(function(player,ctx)
         svbox.name = "svbox"
         settings_screen = gui.ScrollableVBox(svbox)
     end
-    local rtn_gui = gui.VBox {
+    local content_body = gui.HBox {
+        gui.ScrollableVBox(navbar),
+        settings_screen
+    }
+    local content_with_header = gui.VBox {
         gui.HBox {
             gui.Label { label = S("Settings"), expand = true, align_h = "left" },
             gui.ButtonExit { w = 0.7, h = 0.7, label = "x" }
         },
         gui.Box{w = 1, h = 0.05, color = "grey", padding = 0},
-        gui.HBox {
-            gui.ScrollableVBox(navbar),
-            settings_screen
-        }
+        content_body
     }
-    return rtn_gui
+    return ctx.inside_sway and content_body or content_with_header
 end)
 
 minetest.register_chatcommand("settings", {
@@ -288,3 +289,20 @@ minetest.register_chatcommand("settings", {
         _ps.gui:show(minetest.get_player_by_name(name))
     end
 })
+
+if minetest.get_modpath("sway") then
+    sway.register_page("player_settings:settings", {
+        title = S("Settings"),
+        get = function (_self, player, ctx)
+            if not ctx.player_settings then
+                ctx.player_settings = { inside_sway = true }
+            end
+            return sway.Form {
+                _ps.gui:embed {
+                    player = player,
+                    name = "player_settings"
+                }
+            }
+        end
+    })
+end
